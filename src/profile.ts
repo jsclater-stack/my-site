@@ -22,20 +22,20 @@ export const profile = {
   email: "jsclater@udel.edu",
 
   /** Where you're from. Shows on your roster card and /about. */
-  hometown: "Stalbridge, Dorset",
+  hometown: "Stalbridge, Dorset, United Kingdom",
 
   /**
    * 2 to 4 fun facts (the grader checks the count!). Real ones: they're
    * how classmates find something to say hello about.
    */
   funFacts: [
-    "I once assembled IKEA furniture without leftover screws.",
-    "I can name every U.S. state capital in under two minutes.",
+    "At the beginning of this semester I took the cheapest possible public transport journey up to New York, taking me 5 hours there, 5 hours back - all in one day and for one meeting.",
+    "I have been to all but 3 countries in europe",
   ],
 
   /** One decision you're proud of, in a sentence. */
-  decisionImProudOf:
-    "I chose to take a gap semester to work retail; it taught me more about customers than any textbook.",
+  decisionImProudOf: 
+    "I have invested all of my free time into getting a job in New York or Boston - made much more difficult because I am an international student",
 
   /**
    * Your photo. Replace public/photo.svg with a real photo of you
