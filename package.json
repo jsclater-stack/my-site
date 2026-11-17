@@ -9,7 +9,9 @@
     "selfcheck": "node scripts/selfcheck.mjs",
     "try-reasoning": "node scripts/try-reasoning.mjs",
     "try-simulator": "node scripts/try-simulator.mjs",
-    "draw-dag": "python scripts/draw-dag.py"
+    "draw-dag": "python scripts/draw-dag.py",
+    "try-causality": "node scripts/try-causality.mjs",
+    "draw-causality-dags": "python scripts/draw-causality-dags.py"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.0",

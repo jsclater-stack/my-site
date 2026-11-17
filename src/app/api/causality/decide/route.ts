@@ -1,12 +1,23 @@
-import { notBuiltYet } from "@/lib/not-built-yet";
+import { NextResponse } from "next/server";
+import { auditDataset, cleanRows } from "@/lib/causality-audit";
+import { saveLatest, type CausalityContext } from "@/lib/causality-store";
 
-/**
- * ── TODO: Lane 4 — Challenge 4, "Causality Audit Service" ────────────────
- * The platform will POST datasets with business narratives here; your
- * service names the causal structure and says whether to stratify. See the
- * challenge page for the contract and the course-provided helper.
- * Until then it returns 501 so probes honestly fail.
- */
-export async function POST() {
-  return notBuiltYet(4, "Causality Audit Service");
+export const maxDuration = 10;
+
+export async function POST(req: Request) {
+  const body = (await req.json().catch(() => null)) as
+    | { probeId?: string; context?: CausalityContext; dataset?: unknown }
+    | null;
+
+  const rows = cleanRows(body?.dataset);
+  if (!body || !body.context || rows.length === 0) {
+    return NextResponse.json(
+      { error: "expected a causality-audit probe with a context and a dataset of {x, z, y} rows" },
+      { status: 400 }
+    );
+  }
+
+  const { answer, summary } = auditDataset(rows, body.context);
+  await saveLatest({ probeId: body.probeId, context: body.context }, answer, summary);
+  return NextResponse.json(answer);
 }
