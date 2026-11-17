@@ -696,11 +696,222 @@ let challenge2Built = false;
 }
 const challenge2Failures = c2.filter((r) => !r.ok).length;
 
+// ── Challenge 3: Decision Simulator ─────────────────────────────────────────
+const c3 = [];
+function report3(ok, label, detail) {
+  c3.push({ ok, label, detail });
+  const mark = ok ? "\u2713" : "\u2717";
+  console.log(`  ${mark} ${label}`);
+  if (!ok && detail) console.log(`      ${detail}`);
+}
+
+function logChoose(n, k) {
+  let s = 0;
+  for (let i = 1; i <= k; i++) s += Math.log(n - k + i) - Math.log(i);
+  return s;
+}
+
+function exactSimulatorRow(fraction, game) {
+  const n = game.horizonYears;
+  const u = 1 + fraction * (game.upPct / 100);
+  const d = 1 - fraction * (game.downPct / 100);
+  const logP = -n * Math.LN2;
+  let cdf = 0;
+  let probLoss = 0;
+  let median = game.buyIn;
+  for (let h = 0; h <= n; h++) {
+    const p = Math.exp(logChoose(n, h) + logP);
+    const wealth = game.buyIn * u ** h * d ** (n - h);
+    if (wealth < game.buyIn) probLoss += p;
+    const prev = cdf;
+    cdf += p;
+    if (prev < 0.5 && cdf >= 0.5) median = wealth;
+  }
+  return { fraction, medianFinalBalance: median, probLoss };
+}
+
+function solveSimulator(game) {
+  let best = null;
+  for (const fraction of game.candidateFractions) {
+    const row = exactSimulatorRow(fraction, game);
+    if (!best || row.medianFinalBalance > best.medianFinalBalance) best = row;
+  }
+  return best;
+}
+
+function gradeSimulator(game, answer) {
+  const truth = solveSimulator(game);
+  const f = asNum(answer?.recommendedFraction);
+  if (f === null) return "no numeric `recommendedFraction`";
+  if (Math.abs(f - truth.fraction) > 1e-9) {
+    return `recommendedFraction was ${f}, the typical-investor stake is ${truth.fraction}`;
+  }
+  const m = asNum(answer?.medianFinalBalance);
+  if (m === null) return "no numeric `medianFinalBalance`";
+  if (Math.abs(m - truth.medianFinalBalance) > 0.05 * truth.medianFinalBalance) {
+    return `medianFinalBalance ${m} is outside \u00b15% of the typical path`;
+  }
+  const p = asNum(answer?.probLoss);
+  if (p === null) return "no numeric `probLoss`";
+  if (Math.abs(p - truth.probLoss) > 0.03) {
+    return `probLoss ${p} is outside \u00b10.03 of the typical path`;
+  }
+  return null;
+}
+
+const C3_GAMES = [
+  {
+    probeId: "selfcheck-sim-1",
+    type: "investment-game",
+    scenario:
+      "Buy in with $30,000; each year a fair coin flips the staked portion +50% or -40%, for 30 years.",
+    upPct: 50,
+    downPct: 40,
+    horizonYears: 30,
+    buyIn: 30000,
+    candidateFractions: [0.1, 0.25, 0.5, 1.0],
+  },
+  {
+    probeId: "selfcheck-sim-2",
+    type: "investment-game",
+    scenario:
+      "Buy in with $10,000; each year a fair coin flips the staked portion +80% or -50%, for 12 years.",
+    upPct: 80,
+    downPct: 50,
+    horizonYears: 12,
+    buyIn: 10000,
+    candidateFractions: [0.2, 0.4, 0.7, 1.0],
+  },
+];
+
+let challenge3Built = false;
+{
+  const res = await get("/api/simulator/meta");
+  if (res.status === 200) {
+    challenge3Built = true;
+    console.log("\nChallenge 3 checks (your decision simulator is live):");
+
+    const body = json(res.text);
+    if (!body || body.service !== "simulator") {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        'response must be JSON of the form { service: "simulator", specVersion: "1", studentToken }'
+      );
+    } else if (String(body.specVersion) !== "1") {
+      report3(false, "GET /api/simulator/meta", `specVersion must be "1" (got "${String(body.specVersion)}")`);
+    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {
+      report3(false, "GET /api/simulator/meta", "studentToken is missing");
+    } else if (token && body.studentToken !== token) {
+      report3(
+        false,
+        "GET /api/simulator/meta",
+        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`
+      );
+    } else {
+      report3(true, "GET /api/simulator/meta: service announced, token present");
+    }
+
+    const lastAnswer = { current: null };
+    const misses = [];
+    let correct = 0;
+    for (const game of C3_GAMES) {
+      const r = await get("/api/simulator/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(game),
+      });
+      let miss;
+      let answer = null;
+      if (r.error) miss = r.error;
+      else if (!r.ok) miss = `HTTP ${r.status}`;
+      else {
+        answer = json(r.text);
+        miss = answer === null ? "response was not valid JSON" : gradeSimulator(game, answer);
+      }
+      if (miss === null) correct += 1;
+      else misses.push(`${game.probeId}: ${miss}`);
+      lastAnswer.current = answer;
+    }
+    if (correct === C3_GAMES.length) {
+      report3(true, `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`);
+    } else {
+      report3(
+        false,
+        `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`,
+        `first miss ${misses[0]} (run npm run try-simulator for a side-by-side)`
+      );
+    }
+
+    const page = await get("/simulator");
+    if (page.error || !page.ok) {
+      report3(false, "GET /simulator", page.error ?? `returned HTTP ${page.status}`);
+    } else {
+      const problems = [];
+      const readAttr = (key) => {
+        const m = page.text.match(new RegExp(`<[^>]*data-simulator="${key}"[^>]*>([^<]*)<`));
+        return m ? m[1].trim() : null;
+      };
+      const fractionShown = readAttr("recommended-fraction");
+      const medianShown = readAttr("median-final");
+      const lossShown = readAttr("prob-loss");
+      const answered = lastAnswer.current;
+      if (fractionShown === null || fractionShown === "") {
+        problems.push('no element with data-simulator="recommended-fraction"');
+      } else if (answered && asNum(fractionShown) !== null && asNum(answered.recommendedFraction) !== null) {
+        if (Math.abs(asNum(fractionShown) - asNum(answered.recommendedFraction)) > 1e-9) {
+          problems.push(
+            `the page shows fraction "${fractionShown}" but the API just answered ${answered.recommendedFraction}`
+          );
+        }
+      }
+      if (medianShown === null || medianShown === "") {
+        problems.push('no element with data-simulator="median-final"');
+      } else if (answered && asNum(medianShown) !== null && asNum(answered.medianFinalBalance) !== null) {
+        if (Math.abs(asNum(medianShown.replace(/[$,]/g, "")) - asNum(answered.medianFinalBalance)) > 0.5 + 1e-9) {
+          problems.push(
+            `data-simulator="median-final" shows "${medianShown}" but the API just answered ${answered.medianFinalBalance}`
+          );
+        }
+      }
+      if (lossShown === null || lossShown === "") {
+        problems.push('no element with data-simulator="prob-loss"');
+      } else if (answered && asNum(lossShown) !== null && asNum(answered.probLoss) !== null) {
+        if (Math.abs(asNum(lossShown) - asNum(answered.probLoss)) > 0.005 + 1e-9) {
+          problems.push(
+            `data-simulator="prob-loss" shows "${lossShown}" but the API just answered ${answered.probLoss}`
+          );
+        }
+      }
+      const img = page.text.match(/<img[^>]*data-simulator="dag"[^>]*>/i);
+      if (!img) {
+        problems.push('no <img data-simulator="dag">');
+      } else {
+        const srcMatch = img[0].match(/\ssrc=["']([^"']+)["']/i);
+        if (!srcMatch) {
+          problems.push("the DAG image has no src");
+        } else {
+          const dag = await get(srcMatch[1]);
+          if (!dag.ok || !dag.contentType.startsWith("image/")) {
+            problems.push(`DAG src "${srcMatch[1]}" did not load as an image (HTTP ${dag.status})`);
+          }
+        }
+      }
+      if (problems.length === 0) {
+        report3(true, "/simulator page: bound to the same live data the API serves, DAG loads");
+      } else {
+        report3(false, "/simulator page bound to live data", problems.join("; "));
+      }
+    }
+  }
+}
+const challenge3Failures = c3.filter((r) => !r.ok).length;
+
 // ── Later-lane stubs: these SHOULD fail until their lane ────────────────────
 console.log("\nLater-lane stubs (these should NOT pass yet — 501 is correct):");
 const stubs = [
   ...(challenge2Built ? [] : [["/api/reasoning/meta", "Lane 2"]]),
-  ["/api/simulator/meta", "Lane 3"],
+  ...(challenge3Built ? [] : [["/api/simulator/meta", "Lane 3"]]),
   ["/api/causality/meta", "Lane 4"],
   ["/api/capstone/meta", "Lane 5"],
 ];
@@ -721,8 +932,11 @@ for (const [path, lane] of stubs) {
 
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log("");
-if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) {
-  if (challenge2Built) {
+if (challenge1Failures === 0 && challenge2Failures === 0 && challenge3Failures === 0 && stubProblems === 0) {
+  if (challenge3Built) {
+    console.log("All Challenge 1–3 checks pass. Deploy, then run the");
+    console.log("real probe battery from the Challenge 3 page on the course platform.");
+  } else if (challenge2Built) {
     console.log("All Challenge 1 and Challenge 2 checks pass. Deploy, then run the");
     console.log("real probe battery from the Challenge 2 page on the course platform.");
   } else {
@@ -739,6 +953,9 @@ if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) 
   }
   if (challenge2Failures > 0) {
     parts.push(`${challenge2Failures} Challenge 2 check${challenge2Failures === 1 ? "" : "s"}`);
+  }
+  if (challenge3Failures > 0) {
+    parts.push(`${challenge3Failures} Challenge 3 check${challenge3Failures === 1 ? "" : "s"}`);
   }
   if (stubProblems > 0) {
     parts.push(`${stubProblems} stub problem${stubProblems === 1 ? "" : "s"}`);

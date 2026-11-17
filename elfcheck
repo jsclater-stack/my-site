@@ -1,0 +1,281 @@
+[1mdiff --git a/package.json b/package.json[m
+[1mindex 3ad93c0..6cd6d50 100644[m
+[1m--- a/package.json[m
+[1m+++ b/package.json[m
+[36m@@ -7,7 +7,9 @@[m
+     "build": "next build",[m
+     "start": "next start",[m
+     "selfcheck": "node scripts/selfcheck.mjs",[m
+[31m-    "try-reasoning": "node scripts/try-reasoning.mjs"[m
+[32m+[m[32m    "try-reasoning": "node scripts/try-reasoning.mjs",[m
+[32m+[m[32m    "try-simulator": "node scripts/try-simulator.mjs",[m
+[32m+[m[32m    "draw-dag": "python scripts/draw-dag.py"[m
+   },[m
+   "dependencies": {[m
+     "@supabase/supabase-js": "^2.110.0",[m
+[1mdiff --git a/scripts/selfcheck.mjs b/scripts/selfcheck.mjs[m
+[1mindex 92c0d02..e45d114 100644[m
+[1m--- a/scripts/selfcheck.mjs[m
+[1m+++ b/scripts/selfcheck.mjs[m
+[36m@@ -696,11 +696,222 @@[m [mlet challenge2Built = false;[m
+ }[m
+ const challenge2Failures = c2.filter((r) => !r.ok).length;[m
+ [m
+[32m+[m[32m// ── Challenge 3: Decision Simulator ─────────────────────────────────────────[m
+[32m+[m[32mconst c3 = [];[m
+[32m+[m[32mfunction report3(ok, label, detail) {[m
+[32m+[m[32m  c3.push({ ok, label, detail });[m
+[32m+[m[32m  const mark = ok ? "\u2713" : "\u2717";[m
+[32m+[m[32m  console.log(`  ${mark} ${label}`);[m
+[32m+[m[32m  if (!ok && detail) console.log(`      ${detail}`);[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction logChoose(n, k) {[m
+[32m+[m[32m  let s = 0;[m
+[32m+[m[32m  for (let i = 1; i <= k; i++) s += Math.log(n - k + i) - Math.log(i);[m
+[32m+[m[32m  return s;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction exactSimulatorRow(fraction, game) {[m
+[32m+[m[32m  const n = game.horizonYears;[m
+[32m+[m[32m  const u = 1 + fraction * (game.upPct / 100);[m
+[32m+[m[32m  const d = 1 - fraction * (game.downPct / 100);[m
+[32m+[m[32m  const logP = -n * Math.LN2;[m
+[32m+[m[32m  let cdf = 0;[m
+[32m+[m[32m  let probLoss = 0;[m
+[32m+[m[32m  let median = game.buyIn;[m
+[32m+[m[32m  for (let h = 0; h <= n; h++) {[m
+[32m+[m[32m    const p = Math.exp(logChoose(n, h) + logP);[m
+[32m+[m[32m    const wealth = game.buyIn * u ** h * d ** (n - h);[m
+[32m+[m[32m    if (wealth < game.buyIn) probLoss += p;[m
+[32m+[m[32m    const prev = cdf;[m
+[32m+[m[32m    cdf += p;[m
+[32m+[m[32m    if (prev < 0.5 && cdf >= 0.5) median = wealth;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  return { fraction, medianFinalBalance: median, probLoss };[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction solveSimulator(game) {[m
+[32m+[m[32m  let best = null;[m
+[32m+[m[32m  for (const fraction of game.candidateFractions) {[m
+[32m+[m[32m    const row = exactSimulatorRow(fraction, game);[m
+[32m+[m[32m    if (!best || row.medianFinalBalance > best.medianFinalBalance) best = row;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  return best;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mfunction gradeSimulator(game, answer) {[m
+[32m+[m[32m  const truth = solveSimulator(game);[m
+[32m+[m[32m  const f = asNum(answer?.recommendedFraction);[m
+[32m+[m[32m  if (f === null) return "no numeric `recommendedFraction`";[m
+[32m+[m[32m  if (Math.abs(f - truth.fraction) > 1e-9) {[m
+[32m+[m[32m    return `recommendedFraction was ${f}, the typical-investor stake is ${truth.fraction}`;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  const m = asNum(answer?.medianFinalBalance);[m
+[32m+[m[32m  if (m === null) return "no numeric `medianFinalBalance`";[m
+[32m+[m[32m  if (Math.abs(m - truth.medianFinalBalance) > 0.05 * truth.medianFinalBalance) {[m
+[32m+[m[32m    return `medianFinalBalance ${m} is outside \u00b15% of the typical path`;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  const p = asNum(answer?.probLoss);[m
+[32m+[m[32m  if (p === null) return "no numeric `probLoss`";[m
+[32m+[m[32m  if (Math.abs(p - truth.probLoss) > 0.03) {[m
+[32m+[m[32m    return `probLoss ${p} is outside \u00b10.03 of the typical path`;[m
+[32m+[m[32m  }[m
+[32m+[m[32m  return null;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32mconst C3_GAMES = [[m
+[32m+[m[32m  {[m
+[32m+[m[32m    probeId: "selfcheck-sim-1",[m
+[32m+[m[32m    type: "investment-game",[m
+[32m+[m[32m    scenario:[m
+[32m+[m[32m      "Buy in with $30,000; each year a fair coin flips the staked portion +50% or -40%, for 30 years.",[m
+[32m+[m[32m    upPct: 50,[m
+[32m+[m[32m    downPct: 40,[m
+[32m+[m[32m    horizonYears: 30,[m
+[32m+[m[32m    buyIn: 30000,[m
+[32m+[m[32m    candidateFractions: [0.1, 0.25, 0.5, 1.0],[m
+[32m+[m[32m  },[m
+[32m+[m[32m  {[m
+[32m+[m[32m    probeId: "selfcheck-sim-2",[m
+[32m+[m[32m    type: "investment-game",[m
+[32m+[m[32m    scenario:[m
+[32m+[m[32m      "Buy in with $10,000; each year a fair coin flips the staked portion +80% or -50%, for 12 years.",[m
+[32m+[m[32m    upPct: 80,[m
+[32m+[m[32m    downPct: 50,[m
+[32m+[m[32m    horizonYears: 12,[m
+[32m+[m[32m    buyIn: 10000,[m
+[32m+[m[32m    candidateFractions: [0.2, 0.4, 0.7, 1.0],[m
+[32m+[m[32m  },[m
+[32m+[m[32m];[m
+[32m+[m
+[32m+[m[32mlet challenge3Built = false;[m
+[32m+[m[32m{[m
+[32m+[m[32m  const res = await get("/api/simulator/meta");[m
+[32m+[m[32m  if (res.status === 200) {[m
+[32m+[m[32m    challenge3Built = true;[m
+[32m+[m[32m    console.log("\nChallenge 3 checks (your decision simulator is live):");[m
+[32m+[m
+[32m+[m[32m    const body = json(res.text);[m
+[32m+[m[32m    if (!body || body.service !== "simulator") {[m
+[32m+[m[32m      report3([m
+[32m+[m[32m        false,[m
+[32m+[m[32m        "GET /api/simulator/meta",[m
+[32m+[m[32m        'response must be JSON of the form { service: "simulator", specVersion: "1", studentToken }'[m
+[32m+[m[32m      );[m
+[32m+[m[32m    } else if (String(body.specVersion) !== "1") {[m
+[32m+[m[32m      report3(false, "GET /api/simulator/meta", `specVersion must be "1" (got "${String(body.specVersion)}")`);[m
+[32m+[m[32m    } else if (!body.studentToken || body.studentToken === "SITE_TOKEN-env-var-not-set") {[m
+[32m+[m[32m      report3(false, "GET /api/simulator/meta", "studentToken is missing");[m
+[32m+[m[32m    } else if (token && body.studentToken !== token) {[m
+[32m+[m[32m      report3([m
+[32m+[m[32m        false,[m
+[32m+[m[32m        "GET /api/simulator/meta",[m
+[32m+[m[32m        `the site's studentToken ("${body.studentToken}") doesn't match your local SITE_TOKEN ("${token}")`[m
+[32m+[m[32m      );[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      report3(true, "GET /api/simulator/meta: service announced, token present");[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const lastAnswer = { current: null };[m
+[32m+[m[32m    const misses = [];[m
+[32m+[m[32m    let correct = 0;[m
+[32m+[m[32m    for (const game of C3_GAMES) {[m
+[32m+[m[32m      const r = await get("/api/simulator/decide", {[m
+[32m+[m[32m        method: "POST",[m
+[32m+[m[32m        headers: { "Content-Type": "application/json" },[m
+[32m+[m[32m        body: JSON.stringify(game),[m
+[32m+[m[32m      });[m
+[32m+[m[32m      let miss;[m
+[32m+[m[32m      let answer = null;[m
+[32m+[m[32m      if (r.error) miss = r.error;[m
+[32m+[m[32m      else if (!r.ok) miss = `HTTP ${r.status}`;[m
+[32m+[m[32m      else {[m
+[32m+[m[32m        answer = json(r.text);[m
+[32m+[m[32m        miss = answer === null ? "response was not valid JSON" : gradeSimulator(game, answer);[m
+[32m+[m[32m      }[m
+[32m+[m[32m      if (miss === null) correct += 1;[m
+[32m+[m[32m      else misses.push(`${game.probeId}: ${miss}`);[m
+[32m+[m[32m      lastAnswer.current = answer;[m
+[32m+[m[32m    }[m
+[32m+[m[32m    if (correct === C3_GAMES.length) {[m
+[32m+[m[32m      report3(true, `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`);[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      report3([m
+[32m+[m[32m        false,[m
+[32m+[m[32m        `POST /api/simulator/decide: ${correct}/${C3_GAMES.length} sample games correct`,[m
+[32m+[m[32m        `first miss ${misses[0]} (run npm run try-simulator for a side-by-side)`[m
+[32m+[m[32m      );[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    const page = await get("/simulator");[m
+[32m+[m[32m    if (page.error || !page.ok) {[m
+[32m+[m[32m      report3(false, "GET /simulator", page.error ?? `returned HTTP ${page.status}`);[m
+[32m+[m[32m    } else {[m
+[32m+[m[32m      const problems = [];[m
+[32m+[m[32m      const readAttr = (key) => {[m
+[32m+[m[32m        const m = page.text.match(new RegExp(`<[^>]*data-simulator="${key}"[^>]*>([^<]*)<`));[m
+[32m+[m[32m        return m ? m[1].trim() : null;[m
+[32m+[m[32m      };[m
+[32m+[m[32m      const fractionShown = readAttr("recommended-fraction");[m
+[32m+[m[32m      const medianShown = readAttr("median-final");[m
+[32m+[m[32m      const lossShown = readAttr("prob-loss");[m
+[32m+[m[32m      const answered = lastAnswer.current;[m
+[32m+[m[32m      if (fractionShown === null || fractionShown === "") {[m
+[32m+[m[32m        problems.push('no element with data-simulator="recommended-fraction"');[m
+[32m+[m[32m      } else if (answered && asNum(fractionShown) !== null && asNum(answered.recommendedFraction) !== null) {[m
+[32m+[m[32m        if (Math.abs(asNum(fractionShown) - asNum(answered.recommendedFraction)) > 1e-9) {[m
+[32m+[m[32m          problems.push([m
+[32m+[m[32m            `the page shows fraction "${fractionShown}" but the API just answered ${answered.recommendedFraction}`[m
+[32m+[m[32m          );[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m      if (medianShown === null || medianShown === "") {[m
+[32m+[m[32m        problems.push('no element with data-simulator="median-final"');[m
+[32m+[m[32m      } else if (answered && asNum(medianShown) !== null && asNum(answered.medianFinalBalance) !== null) {[m
+[32m+[m[32m        if (Math.abs(asNum(medianShown.replace(/[$,]/g, "")) - asNum(answered.medianFinalBalance)) > 0.5 + 1e-9) {[m
+[32m+[m[32m          problems.push([m
+[32m+[m[32m            `data-simulator="median-final" shows "${medianShown}" but the API just answered ${answered.medianFinalBalance}`[m
+[32m+[m[32m          );[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m      if (lossShown === null || lossShown === "") {[m
+[32m+[m[32m        problems.push('no element with data-simulator="prob-loss"');[m
+[32m+[m[32m      } else if (answered && asNum(lossShown) !== null && asNum(answered.probLoss) !== null) {[m
+[32m+[m[32m        if (Math.abs(asNum(lossShown) - asNum(answered.probLoss)) > 0.005 + 1e-9) {[m
+[32m+[m[32m          problems.push([m
+[32m+[m[32m            `data-simulator="prob-loss" shows "${lossShown}" but the API just answered ${answered.probLoss}`[m
+[32m+[m[32m          );[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m      const img = page.text.match(/<img[^>]*data-simulator="dag"[^>]*>/i);[m
+[32m+[m[32m      if (!img) {[m
+[32m+[m[32m        problems.push('no <img data-simulator="dag">');[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        const srcMatch = img[0].match(/\ssrc=["']([^"']+)["']/i);[m
+[32m+[m[32m        if (!srcMatch) {[m
+[32m+[m[32m          problems.push("the DAG image has no src");[m
+[32m+[m[32m        } else {[m
+[32m+[m[32m          const dag = await get(srcMatch[1]);[m
+[32m+[m[32m          if (!dag.ok || !dag.contentType.startsWith("image/")) {[m
+[32m+[m[32m            problems.push(`DAG src "${srcMatch[1]}" did not load as an image (HTTP ${dag.status})`);[m
+[32m+[m[32m          }[m
+[32m+[m[32m        }[m
+[32m+[m[32m      }[m
+[32m+[m[32m      if (problems.length === 0) {[m
+[32m+[m[32m        report3(true, "/simulator page: bound to the same live data the API serves, DAG loads");[m
+[32m+[m[32m      } else {[m
+[32m+[m[32m        report3(false, "/simulator page bound to live data", problems.join("; "));[m
+[32m+[m[32m      }[m
+[32m+[m[32m    }[m
+[32m+[m[32m  }[m
+[32m+[m[32m}[m
+[32m+[m[32mconst challenge3Failures = c3.filter((r) => !r.ok).length;[m
+[32m+[m
+ // ── Later-lane stubs: these SHOULD fail until their lane ────────────────────[m
+ console.log("\nLater-lane stubs (these should NOT pass yet — 501 is correct):");[m
+ const stubs = [[m
+   ...(challenge2Built ? [] : [["/api/reasoning/meta", "Lane 2"]]),[m
+[31m-  ["/api/simulator/meta", "Lane 3"],[m
+[32m+[m[32m  ...(challenge3Built ? [] : [["/api/simulator/meta", "Lane 3"]]),[m
+   ["/api/causality/meta", "Lane 4"],[m
+   ["/api/capstone/meta", "Lane 5"],[m
+ ];[m
+[36m@@ -721,8 +932,11 @@[m [mfor (const [path, lane] of stubs) {[m
+ [m
+ // ── Summary ────────────────────────────────────────────────────────────────[m
+ console.log("");[m
+[31m-if (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0) {[m
+[31m-  if (challenge2Built) {[m
+[32m+[m[32mif (challenge1Failures === 0 && challenge2Failures === 0 && challenge3Failures === 0 && stubProblems === 0) {[m
+[32m+[m[32m  if (challenge3Built) {[m
+[32m+[m[32m    console.log("All Challenge 1–3 checks pass. Deploy, then run the");[m
+[32m+[m[32m    console.log("real probe battery from the Challenge 3 page on the course platform.");[m
+[32m+[m[32m  } else if (challenge2Built) {[m
+     console.log("All Challenge 1 and Challenge 2 checks pass. Deploy, then run the");[m
+     console.log("real probe battery from the Challenge 2 page on the course platform.");[m
+   } else {[m
+[36m@@ -740,6 +954,9 @@[m [mif (challenge1Failures === 0 && challenge2Failures === 0 && stubProblems === 0)[m
+   if (challenge2Failures > 0) {[m
+     parts.push(`${challenge2Failures} Challenge 2 check${challenge2Failures === 1 ? "" : "s"}`);[m
+   }[m
+[32m+[m[32m  if (challenge3Failures > 0) {[m
+[32m+[m[32m    parts.push(`${challenge3Failures} Challenge 3 check${challenge3Failures === 1 ? "" : "s"}`);[m
+[32m+[m[32m  }[m
+   if (stubProblems > 0) {[m
+     parts.push(`${stubProblems} stub problem${stubProblems === 1 ? "" : "s"}`);[m
+   }[m
+[1mdiff --git a/src/app/layout.tsx b/src/app/layout.tsx[m
+[1mindex e839f90..a79ce89 100644[m
+[1m--- a/src/app/layout.tsx[m
+[1m+++ b/src/app/layout.tsx[m
+[36m@@ -45,6 +45,9 @@[m [mexport default function RootLayout({ children }: { children: ReactNode }) {[m
+               <Link href="/reasoning" className="transition hover:text-accent">[m
+                 Reasoning[m
+               </Link>[m
+[32m+[m[32m              <Link href="/simulator" className="transition hover:text-accent">[m
+[32m+[m[32m                Simulator[m
+[32m+[m[32m              </Link>[m
+             </nav>[m
+           </div>[m
+         </header>[m
